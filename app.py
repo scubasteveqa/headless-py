@@ -1,181 +1,155 @@
-from shiny import App, ui, render, reactive
-import matplotlib.pyplot as plt
-import io
-import base64
-import tempfile
 import os
-import sys
 import time
-from PIL import Image
-
-# Import selenium for controlling headless Chrome
+import base64
+import streamlit as st
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+from PIL import Image
+import io
 
-# UI definition with sidebar layout
-app_ui = ui.page_sidebar(
-    ui.sidebar(
-        ui.h3("Website Screenshot Tool"),
-        ui.input_text("url", "Enter URL:", value="https://www.python.org/"),
-        ui.input_slider("width", "Viewport Width:", min=320, max=1920, value=1280, step=10),
-        ui.input_slider("height", "Viewport Height:", min=320, max=1080, value=800, step=10),
-        ui.input_checkbox("full_page", "Capture Full Page", value=False),
-        ui.hr(),
-        ui.input_action_button("capture", "Capture Screenshot", class_="btn-primary"),
-        ui.download_button("download", "Download Screenshot"),
-        ui.hr(),
-        ui.p("This app uses headless Chrome via Selenium to capture website screenshots."),
-    ),
-    ui.card(
-        ui.card_header("Screenshot Preview"),
-        ui.output_ui("status_message"),
-        ui.output_image("screenshot_output"),
-        full_screen=True
-    ),
-    title="Headless Chrome Screenshot Tool",
-)
+st.set_page_config(page_title="Headless Chrome Browser Automation", layout="wide")
+st.title("🌐 Web Automation with Headless Chrome")
 
-def server(input, output, session):
-    # Store the captured screenshot and status
-    screenshot_data = reactive.value(None)
-    driver = reactive.value(None)
-    
-    # Initialize the headless Chrome browser
-    @reactive.effect
-    def initialize_chrome():
+class HeadlessBrowser:
+    def __init__(self):
+        self.options = Options()
+        self.options.add_argument("--headless")
+        self.options.add_argument("--no-sandbox")
+        self.options.add_argument("--disable-dev-shm-usage")
+        self.options.add_argument("--disable-gpu")
+        self.options.add_argument("--window-size=1920,1080")
+        
+    def start_browser(self):
+        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), 
+                                        options=self.options)
+        return self.driver
+        
+    def take_screenshot(self, url):
+        driver = self.start_browser()
         try:
-            # Set up Chrome options for headless mode
-            chrome_options = Options()
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
+            driver.get(url)
+            time.sleep(2)  # Wait for page to fully load
+            screenshot = driver.get_screenshot_as_png()
+            return screenshot
+        finally:
+            driver.quit()
             
-            # Initialize the browser
-            driver_instance = webdriver.Chrome(options=chrome_options)
-            driver(driver_instance)
-            ui.notification_show("Headless Chrome initialized successfully", type="message")
-        except Exception as e:
-            ui.notification_show(f"Failed to initialize Chrome: {str(e)}", type="error")
-    
-    # Clean up Chrome when the app is closed
-    @reactive.effect
-    def cleanup_on_exit():
-        session.on_ended(lambda: close_chrome())
-    
-    def close_chrome():
-        if driver() is not None:
-            try:
-                driver().quit()
-            except:
-                pass
-    
-    # Status message display
-    @render.ui
-    def status_message():
-        if driver() is None:
-            return ui.div(
-                ui.tags.div(
-                    ui.tags.i(class_="fa fa-exclamation-triangle"), 
-                    " Chrome not available. Please wait for initialization or check console for errors.",
-                    class_="alert alert-warning"
-                )
+    def extract_text(self, url, css_selector):
+        driver = self.start_browser()
+        try:
+            driver.get(url)
+            elements = WebDriverWait(driver, 10).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, css_selector))
             )
-        elif screenshot_data() is None:
-            return ui.div(
-                ui.tags.div(
-                    ui.tags.i(class_="fa fa-info-circle"),
-                    " Click 'Capture Screenshot' to take a screenshot.",
-                    class_="alert alert-info"
-                )
-            )
-        return None
-    
-    # Capture screenshot when the button is clicked
-    @reactive.effect
-    @reactive.event(input.capture)
-    def take_screenshot():
-        if driver() is None:
-            ui.notification_show("Chrome is not initialized yet", type="error")
-            return
-        
-        # Check if URL is valid
-        url = input.url()
-        if not url:
-            ui.notification_show("Please enter a valid URL", type="warning")
-            return
-        
-        # Add http:// if missing
-        if not url.startswith(("http://", "https://")):
-            url = "http://" + url
-        
-        with ui.Progress(min=0, max=100) as p:
-            p.set(message="Taking screenshot...", detail="Navigating to page", value=0)
+            results = [element.text for element in elements]
+            return results
+        finally:
+            driver.quit()
             
-            try:
-                # Navigate to the URL
-                driver().get(url)
-                p.set(value=30, detail="Page loaded")
-                
-                # Set viewport size
-                driver().set_window_size(input.width(), input.height())
-                p.set(value=50, detail="Setting viewport size")
-                
-                # Wait for page to load completely
-                time.sleep(2)  # Simple wait for page load
-                p.set(value=70, detail="Waiting for page to load")
-                
-                # Take screenshot
-                if input.full_page():
-                    # Get page dimensions and scroll through
-                    p.set(value=80, detail="Taking full page screenshot")
-                    
-                    # Get the height of the entire page
-                    total_height = driver().execute_script("return document.body.scrollHeight")
-                    driver().set_window_size(input.width(), total_height)
-                    
-                    # Take screenshot after resize
-                    time.sleep(0.5)
-                    
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-                driver().save_screenshot(temp_file.name)
-                
-                # Read the image into memory
-                with open(temp_file.name, "rb") as file:
-                    img_data = file.read()
-                
-                # Store the screenshot data
-                screenshot_data(img_data)
-                os.unlink(temp_file.name)  # Delete the temp file
-                
-                p.set(value=100, detail="Screenshot captured")
-                ui.notification_show("Screenshot captured successfully", type="message")
-                
-            except Exception as e:
-                ui.notification_show(f"Error capturing screenshot: {str(e)}", type="error")
-    
-    # Display the screenshot - Fixed to avoid data URL issue
-    @render.image
-    def screenshot_output():
-        # If no screenshot, return a blank/transparent image
-        if screenshot_data() is None:
-            blank_img = Image.new('RGBA', (1, 1), (0, 0, 0, 0))
-            buffer = io.BytesIO()
-            blank_img.save(buffer, format="PNG")
-            buffer.seek(0)
-            return buffer
-        
-        # Return the actual screenshot
-        return io.BytesIO(screenshot_data())
-    
-    # Handle downloads
-    @session.download(filename=lambda: f"screenshot-{time.strftime('%Y%m%d-%H%M%S')}.png")
-    def download():
-        if screenshot_data() is None:
-            return None
-        return io.BytesIO(screenshot_data())
+    def generate_pdf(self, url):
+        driver = self.start_browser()
+        try:
+            driver.get(url)
+            time.sleep(2)  # Wait for page to fully load
+            
+            # Generate PDF using Chrome's DevTools Protocol
+            pdf_data = driver.execute_cdp_cmd("Page.printToPDF", {
+                "printBackground": True,
+                "paperWidth": 8.5,
+                "paperHeight": 11,
+                "marginTop": 0.4,
+                "marginBottom": 0.4,
+                "marginLeft": 0.4,
+                "marginRight": 0.4
+            })
+            
+            return base64.b64decode(pdf_data['data'])
+        finally:
+            driver.quit()
 
-app = App(app_ui, server)
+# Create output directory if it doesn't exist
+os.makedirs("output", exist_ok=True)
+
+# Sidebar for input fields
+with st.sidebar:
+    st.header("Input Parameters")
+    url = st.text_input("Enter URL:", value="https://www.python.org")
+    
+    operation = st.radio(
+        "Select Operation:",
+        ["Screenshot", "Extract Text", "Generate PDF"]
+    )
+    
+    if operation == "Extract Text":
+        css_selector = st.text_input("CSS Selector:", value="h2, p")
+
+# Initialize browser instance
+browser = HeadlessBrowser()
+
+# Main content area
+if st.button("Run Operation", type="primary"):
+    with st.spinner("Processing..."):
+        if operation == "Screenshot":
+            st.subheader("Screenshot")
+            screenshot = browser.take_screenshot(url)
+            
+            # Display screenshot
+            image = Image.open(io.BytesIO(screenshot))
+            st.image(image, caption=f"Screenshot of {url}", use_column_width=True)
+            
+            # Add download button
+            st.download_button(
+                label="Download Screenshot",
+                data=screenshot,
+                file_name="screenshot.png",
+                mime="image/png"
+            )
+            
+        elif operation == "Extract Text":
+            st.subheader("Extracted Text")
+            try:
+                results = browser.extract_text(url, css_selector)
+                
+                if not results:
+                    st.warning(f"No elements found matching selector: '{css_selector}'")
+                else:
+                    for i, text in enumerate(results):
+                        if text.strip():  # Only display non-empty text
+                            st.write(f"Element {i+1}:")
+                            st.info(text)
+            except Exception as e:
+                st.error(f"Error extracting text: {str(e)}")
+                
+        elif operation == "Generate PDF":
+            st.subheader("Generated PDF")
+            try:
+                pdf_data = browser.generate_pdf(url)
+                
+                # Provide download button
+                st.download_button(
+                    label="Download PDF",
+                    data=pdf_data,
+                    file_name="webpage.pdf",
+                    mime="application/pdf"
+                )
+                
+                # Display PDF preview (using iframe)
+                base64_pdf = base64.b64encode(pdf_data).decode('utf-8')
+                pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
+                st.markdown(pdf_display, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Error generating PDF: {str(e)}")
+
+st.divider()
+st.markdown("""
+### Instructions
+1. Enter a URL in the sidebar
+2. Choose an operation (Screenshot, Extract Text, or Generate PDF)
+3. For text extraction, specify the CSS selector
+4. Click "Run Operation" to execute
+""")
