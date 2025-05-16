@@ -33,7 +33,7 @@ app_ui = ui.page_sidebar(
     ui.card(
         ui.card_header("Screenshot Preview"),
         ui.output_ui("status_message"),
-        ui.output_image("screenshot"),
+        ui.output_image("screenshot_output"),  # Changed the output ID
         full_screen=True
     ),
     title="Headless Chrome Screenshot Tool",
@@ -41,7 +41,7 @@ app_ui = ui.page_sidebar(
 
 def server(input, output, session):
     # Store the captured screenshot and status
-    screenshot = reactive.value(None)
+    screenshot_data = reactive.value(None)  # Renamed from screenshot to screenshot_data
     driver = reactive.value(None)
     
     # Initialize the headless Chrome browser
@@ -84,7 +84,7 @@ def server(input, output, session):
                     class_="alert alert-warning"
                 )
             )
-        elif screenshot() is None:
+        elif screenshot_data() is None:  # Changed to screenshot_data
             return ui.div(
                 ui.tags.div(
                     ui.tags.i(class_="fa fa-info-circle"),
@@ -145,10 +145,10 @@ def server(input, output, session):
                 
                 # Read the image into memory
                 with open(temp_file.name, "rb") as file:
-                    screenshot_data = file.read()
+                    img_data = file.read()
                 
                 # Store the screenshot data
-                screenshot(screenshot_data)
+                screenshot_data(img_data)  # Changed to screenshot_data
                 os.unlink(temp_file.name)  # Delete the temp file
                 
                 p.set(value=100, detail="Screenshot captured")
@@ -158,9 +158,9 @@ def server(input, output, session):
                 ui.notification_show(f"Error capturing screenshot: {str(e)}", type="error")
     
     # Display the screenshot
-    @render.image
-    def screenshot():
-        if screenshot() is None:
+    @render.image  # Changed function name to avoid naming conflict
+    def screenshot_output():  # Renamed from screenshot to screenshot_output
+        if screenshot_data() is None:  # Changed to screenshot_data
             # Return a transparent 1x1 pixel if no screenshot
             img = Image.new('RGBA', (1, 1), (0, 0, 0, 0))
             buffer = io.BytesIO()
@@ -168,13 +168,13 @@ def server(input, output, session):
             return {"src": f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode('utf-8')}"}
         
         # Return the screenshot
-        return {"src": f"data:image/png;base64,{base64.b64encode(screenshot()).decode('utf-8')}"}
+        return {"src": f"data:image/png;base64,{base64.b64encode(screenshot_data()).decode('utf-8')}"}  # Changed to screenshot_data
     
     # Handle downloads
     @session.download(filename=lambda: f"screenshot-{time.strftime('%Y%m%d-%H%M%S')}.png")
     def download():
-        if screenshot() is None:
+        if screenshot_data() is None:  # Changed to screenshot_data
             return None
-        return io.BytesIO(screenshot())
+        return io.BytesIO(screenshot_data())  # Changed to screenshot_data
 
 app = App(app_ui, server)
