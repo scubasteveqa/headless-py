@@ -33,7 +33,7 @@ app_ui = ui.page_sidebar(
     ui.card(
         ui.card_header("Screenshot Preview"),
         ui.output_ui("status_message"),
-        ui.output_ui("screenshot_output"),  # Changed to output_ui
+        ui.output_image("screenshot_output"),
         full_screen=True
     ),
     title="Headless Chrome Screenshot Tool",
@@ -157,29 +157,19 @@ def server(input, output, session):
             except Exception as e:
                 ui.notification_show(f"Error capturing screenshot: {str(e)}", type="error")
     
-    # Display the screenshot - Changed to use render.ui instead of render.image
-    @render.ui
+    # Display the screenshot - Fixed to avoid data URL issue
+    @render.image
     def screenshot_output():
+        # If no screenshot, return a blank/transparent image
         if screenshot_data() is None:
-            # Return a message if no screenshot
-            return ui.div(
-                style="text-align: center; padding: 20px;",
-                ui.tags.img(
-                    src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-                    style="width: 1px; height: 1px; visibility: hidden;"
-                )
-            )
+            blank_img = Image.new('RGBA', (1, 1), (0, 0, 0, 0))
+            buffer = io.BytesIO()
+            blank_img.save(buffer, format="PNG")
+            buffer.seek(0)
+            return buffer
         
-        # Convert binary data to base64 for displaying in an img tag
-        img_base64 = base64.b64encode(screenshot_data()).decode('utf-8')
-        return ui.div(
-            style="text-align: center; max-width: 100%; overflow: auto;",
-            ui.tags.img(
-                src=f"data:image/png;base64,{img_base64}",
-                style="max-width: 100%;",
-                alt="Website Screenshot"
-            )
-        )
+        # Return the actual screenshot
+        return io.BytesIO(screenshot_data())
     
     # Handle downloads
     @session.download(filename=lambda: f"screenshot-{time.strftime('%Y%m%d-%H%M%S')}.png")
